@@ -1,5 +1,5 @@
 import torch
-# import wandb
+import wandb
 from TTS.tts.layers.xtts.dvae import DiscreteVAE
 from TTS.tts.layers.tortoise.arch_utils import TorchMelSpectrogram
 from torch.utils.data import DataLoader
@@ -47,10 +47,27 @@ class DVAETrainerArgs:
     batch_size: Optional[int] = field(
         default=512,
     )
+    wandb_project: Optional[str] = field(
+        default="xtts-vietnamese-dvae",
+        metadata={"help": "Name of the wandb project"},
+    )
+    wandb_entity: Optional[str] = field(
+        default=None,
+        metadata={"help": "wandb entity name"},
+    )
+    wandb_run_name: Optional[str] = field(
+        default=None,
+        metadata={"help": "Name for this specific run in wandb"},
+    )
+    wandb_log_interval: Optional[int] = field(
+        default=10,
+        metadata={"help": "Log to wandb every N steps"},
+    )
 
 
 
-def train(output_path, train_csv_path, eval_csv_path="", language="en", lr=5e-6, num_epochs=5, batch_size=512):
+def train(output_path, train_csv_path, eval_csv_path="", language="en", lr=5e-6, num_epochs=5, batch_size=512,
+          wandb_project="xtts-vietnamese-dvae", wandb_entity=None, wandb_run_name=None, wandb_log_interval=10):
     dvae_pretrained = os.path.join(output_path, 'XTTS_v2.0_original_model_files/dvae.pth')
     mel_norm_file = os.path.join(output_path, 'XTTS_v2.0_original_model_files/mel_stats.pth')
 
@@ -58,6 +75,21 @@ def train(output_path, train_csv_path, eval_csv_path="", language="en", lr=5e-6,
     now_without_ms = now.replace(microsecond=0)
     # CHECKPOINTS_OUT_PATH = os.path.join(output_path, f"DVAE_checkpoint_{now_without_ms}/")
     # os.makedirs(CHECKPOINTS_OUT_PATH, exist_ok=True)
+    # Initialize wandb
+    run_name = wandb_run_name or f"dvae_finetune_{language}_{now_without_ms}"
+    wandb.init(
+        project=wandb_project,
+        entity=wandb_entity,
+        name=run_name,
+        config={
+            "learning_rate": lr,
+            "epochs": num_epochs,
+            "batch_size": batch_size,
+            "language": language,
+            "model": "XTTS-DVAE",
+            "gradient_clip_norm": 0.5,
+        }
+    )
 
     config_dataset = BaseDatasetConfig(
         formatter="coqui",
@@ -161,27 +193,42 @@ def train(output_path, train_csv_path, eval_csv_path="", language="en", lr=5e-6,
 
     for i in range(num_epochs):
         dvae.train()
+        epoch_loss = 0
         for cur_step, batch in enumerate(train_data_loader):
+            global_step += 1
             opt.zero_grad()
             batch = format_batch(batch)
             recon_loss, commitment_loss, out = dvae(batch['mel'])
             recon_loss = recon_loss.mean()
             total_loss = recon_loss + commitment_loss
-            # print(f"commitment_loss shape: {commitment_loss.shape}")
-            # print(f"recon_loss shape: {recon_loss.shape}")
-            # print(f"total_loss shape: {total_loss.shape}")
             total_loss.backward()
             clip_grad_norm_(dvae.parameters(), GRAD_CLIP_NORM)
             opt.step()
 
-            log = {'epoch': i,
-                'cur_step': cur_step,
-                'loss': total_loss.item(),
-                'recon_loss': recon_loss.item(),
-                'commit_loss': commitment_loss.item()}
-            print(f"epoch: {i}", print(f"step: {cur_step}"), f'loss - {total_loss.item()}', f'recon_loss - {recon_loss.item()}', f'commit_loss - {commitment_loss.item()}')
-            # wandb.log(log)
+            epoch_loss += total_loss.item()
+            
+            log = {
+                'epoch': i,
+                'global_step': global_step,
+                'step': cur_step,
+                'train/loss': total_loss.item(),
+                'train/recon_loss': recon_loss.item(),
+                'train/commit_loss': commitment_loss.item()
+            }
+            
+            print(f"epoch: {i} | step: {cur_step} | loss - {total_loss.item():.6f} | recon_loss - {recon_loss.item():.6f} | commit_loss - {commitment_loss.item():.6f}")
+            
+            # Log to wandb at specified intervals
+            if global_step % wandb_log_interval == 0:
+                wandb.log(log)
+                
             torch.cuda.empty_cache()
+        
+        # Log epoch average loss
+        wandb.log({
+            'epoch': i,
+            'train/epoch_avg_loss': epoch_loss / len(train_data_loader)
+        })
         
         with torch.no_grad():
             dvae.eval()
@@ -192,12 +239,20 @@ def train(output_path, train_csv_path, eval_csv_path="", language="en", lr=5e-6,
                 recon_loss = recon_loss.mean()
                 eval_loss += (recon_loss + commitment_loss).item()
             eval_loss = eval_loss/len(eval_data_loader)
+            wandb.log({
+                'epoch': i,
+                'eval/loss': eval_loss
+            })
             if eval_loss < best_loss:
                 best_loss = eval_loss
                 torch.save(dvae.state_dict(), dvae_pretrained)
+                wandb.log({
+                    'best_eval_loss': best_loss
+                })
             print(f"#######################################\nepoch: {i}\tEVAL loss: {eval_loss}\n#######################################")
 
     print(f'Checkpoint saved at {dvae_pretrained}')
+    wandb.finish()
 
 
 if __name__ == "__main__":
@@ -212,5 +267,9 @@ if __name__ == "__main__":
         output_path=args.output_path,
         num_epochs=args.num_epochs,
         batch_size=args.batch_size,
-        lr=args.lr
+        lr=args.lr,
+        wandb_project=args.wandb_project,
+        wandb_entity=args.wandb_entity,
+        wandb_run_name=args.wandb_run_name,
+        wandb_log_interval=args.wandb_log_interval
     )

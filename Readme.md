@@ -6,13 +6,15 @@ This guide provides instructions for finetuning XTTSv2 on a new language, using 
 
 
 ## Table of Contents
-1. [Installation](#1-installation)
-2. [Data Preparation](#2-data-preparation)
-3. [Pretrained Model Download](#3-pretrained-model-download)
-4. [Vocabulary Extension and Configuration Adjustment](#4-vocabulary-extension-and-configuration-adjustment)
-5. [DVAE Finetuning (Optional)](#5-dvae-finetuning-optional)
-6. [GPT Finetuning](#6-gpt-finetuning)
-7. [Usage Example](#7-usage-example)
+- [XTTSv2 Finetuning Guide for New Languages](#xttsv2-finetuning-guide-for-new-languages)
+  - [Table of Contents](#table-of-contents)
+  - [1. Installation](#1-installation)
+  - [2. Data Preparation](#2-data-preparation)
+  - [3. Pretrained Model Download](#3-pretrained-model-download)
+  - [4. Vocabulary Extension and Configuration Adjustment](#4-vocabulary-extension-and-configuration-adjustment)
+  - [5. DVAE Finetuning (Optional)](#5-dvae-finetuning-optional)
+  - [6. GPT Finetuning](#6-gpt-finetuning)
+  - [7. Usage Example](#7-usage-example)
 
 ## 1. Installation
 
@@ -76,7 +78,7 @@ python download_checkpoint.py --output_path checkpoints/
 Extend the vocabulary and adjust the configuration with:
 
 ```bash
-python extend_vocab_config.py --output_path=checkpoints/ --metadata_path datasets/metadata_train.csv --language vi --extended_vocab_size 2000
+python extend_vocab_config.py --output_path=checkpoints/ --metadata_path vietnamese-datasets/metadata_train.csv --language vi --extended_vocab_size 2000
 ```
 
 ## 5. DVAE Finetuning (Optional)

@@ -1,8 +1,8 @@
 import os
 import gc
-
+import wandb
 from trainer import Trainer, TrainerArgs
-
+import datetime
 from TTS.config.shared_configs import BaseDatasetConfig
 from TTS.tts.datasets import load_tts_samples
 from TTS.tts.layers.xtts.trainer.gpt_trainer import GPTArgs, GPTTrainer, GPTTrainerConfig, XttsAudioConfig
@@ -37,12 +37,22 @@ def create_xtts_trainer_parser():
                         help="Learning rate")
     parser.add_argument("--save_step", type=int, default=5000,
                         help="Save step")
+    # Add wandb parameters
+    parser.add_argument("--wandb_project", type=str, default="xtts-vietnamese-gpt",
+                        help="Name of the wandb project")
+    parser.add_argument("--wandb_entity", type=str, default=None,
+                        help="wandb entity name")
+    parser.add_argument("--wandb_run_name", type=str, default=None,
+                        help="Name for this specific run in wandb")
+    parser.add_argument("--wandb_log_interval", type=int, default=50,
+                        help="Log to wandb every N steps")
 
     return parser
 
 
 
-def train_gpt(metadatas, num_epochs, batch_size, grad_acumm, output_path, max_audio_length, max_text_length, lr, weight_decay, save_step):
+def train_gpt(metadatas, num_epochs, batch_size, grad_acumm, output_path, max_audio_length, max_text_length, lr, weight_decay, save_step,
+              wandb_project="xtts-vietnamese-gpt", wandb_entity=None, wandb_run_name=None, wandb_log_interval=50):
     #  Logging parameters
     RUN_NAME = "GPT_XTTS_FT"
     PROJECT_NAME = "XTTS_trainer"
@@ -52,6 +62,27 @@ def train_gpt(metadatas, num_epochs, batch_size, grad_acumm, output_path, max_au
     # Set here the path that the checkpoints will be saved. Default: ./run/training/
     # OUT_PATH = os.path.join(output_path, "run", "training")
     OUT_PATH = output_path
+    now = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    if wandb_run_name is None:
+        wandb_run_name = f"GPT_XTTS_finetune_{now}"
+    
+    # Initialize wandb
+    wandb.init(
+        project=wandb_project,
+        entity=wandb_entity,
+        name=wandb_run_name,
+        config={
+            "epochs": num_epochs,
+            "batch_size": batch_size,
+            "grad_accumulation_steps": grad_acumm,
+            "max_audio_length": max_audio_length,
+            "max_text_length": max_text_length,
+            "learning_rate": lr,
+            "weight_decay": weight_decay,
+            "save_step": save_step,
+            "languages": [metadata.split(",")[2] for metadata in metadatas]
+        }
+    )
 
     # Training Parameters
     OPTIMIZER_WD_ONLY_ON_WEIGHTS = True  # for multi-gpu training please make it False
@@ -210,7 +241,7 @@ def train_gpt(metadatas, num_epochs, batch_size, grad_acumm, output_path, max_au
     speaker_ref = train_samples[longest_text_idx]["audio_file"]
 
     trainer_out_path = trainer.output_path
-
+    wandb.finish()
     # deallocate VRAM and RAM
     del model, trainer, train_samples, eval_samples
     gc.collect()
@@ -231,7 +262,11 @@ if __name__ == "__main__":
         lr=args.lr,
         max_text_length=args.max_text_length,
         max_audio_length=args.max_audio_length,
-        save_step=args.save_step
+        save_step=args.save_step,
+        wandb_project=args.wandb_project,
+        wandb_entity=args.wandb_entity,
+        wandb_run_name=args.wandb_run_name,
+        wandb_log_interval=args.wandb_log_interval
     )
 
     print(f"Checkpoint saved in dir: {trainer_out_path}")
